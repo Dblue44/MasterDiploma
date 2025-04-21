@@ -1,0 +1,1 @@
+from .state import kafka_producer, redis_client
