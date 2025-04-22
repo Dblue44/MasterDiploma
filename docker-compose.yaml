@@ -15,7 +15,7 @@ services:
       - kafka-net
 
   kafka1:
-    image: confluentinc/cp-kafka:7.8.0
+    image: &kafka-image confluentinc/cp-kafka:7.8.0
     hostname: kafka1
     container_name: kafka1
     depends_on:
@@ -38,6 +38,15 @@ services:
       KAFKA_JMX_HOSTNAME: kafka1
     networks:
       - kafka-net
+
+  init-kafka:
+     image: *kafka-image
+     entrypoint: /bin/bash
+     depends_on:
+       kafka1:
+         condition: service_healthy
+     command: |
+       kafka-topics.sh --create --if-not-exists --topic photo-tasks --replication-factor=1 --partitions=1 --bootstrap-server kafka1:29092
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest

@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
+
 class Settings(BaseSettings):
     # Uvicorn
     UVICORN_HOST: str = 'localhost'
@@ -32,8 +33,10 @@ class Settings(BaseSettings):
     UPLOAD_DIR.mkdir(exist_ok=True)
     RESULT_DIR.mkdir(exist_ok=True)
 
+
 @lru_cache
 def get_settings():
     return Settings()
+
 
 settings = get_settings()

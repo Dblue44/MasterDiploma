@@ -1,7 +1,7 @@
 import asyncio
 import json
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from aiokafka import AIOKafkaConsumer
 from app.core import settings
 from app.services import state
@@ -24,9 +24,13 @@ async def consume_photos():
 
     try:
         async for msg in consumer:
-            data = json.loads(msg.value.decode("utf-8"))
-            task = PhotoTask(**data)
-            await process_task(task)
+            try:
+                data = json.loads(msg.value.decode("utf-8"))
+                task = PhotoTask(**data)
+                await process_task(task)
+            except (json.JSONDecodeError, ValidationError) as e:
+                logger.error(f"Failed to parse task: {str(e)}")
+                continue
     finally:
         await consumer.stop()
 

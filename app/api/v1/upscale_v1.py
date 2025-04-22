@@ -1,22 +1,17 @@
-import os
 import json
 import uuid
 from PIL import Image
-from typing import Annotated
 from fastapi import APIRouter, UploadFile, HTTPException, File
 from fastapi.responses import FileResponse
 from app.core import settings
 from app.logger import logger
-from app.services import state
-from app.services.kafka import PhotoTask
+from app.services import state, PhotoTask, get_filename_by_task_id
 
 upscale_v1 = APIRouter()
 
 
 @upscale_v1.post("/upload")
 async def upload_photo(file: UploadFile = File(...), scale: int = 2):
-    contents = await file.read()
-
     with Image.open(file.file) as img:
         if img.width > 1080 or img.height > 920:
             raise HTTPException(status_code=400, detail="Image dimensions too large")
@@ -25,8 +20,9 @@ async def upload_photo(file: UploadFile = File(...), scale: int = 2):
     filename = f"{task_id}_{file.filename}"
     save_path = settings.UPLOAD_DIR / filename
 
-    with open(save_path, "wb") as f:
-        f.write(contents)
+    with open(save_path, "wb") as out_file:
+        while chunk := await file.read(1024 * 1024):  # 1MB
+            out_file.write(chunk)
 
     task = PhotoTask(task_id=task_id, filename=filename, scale=scale)
 
@@ -36,6 +32,7 @@ async def upload_photo(file: UploadFile = File(...), scale: int = 2):
 
     return {"task_id": task_id}
 
+
 @upscale_v1.get("/status/{task_id}")
 async def get_status(task_id: str):
     if not await state.redis_client.exists(task_id):
@@ -43,9 +40,10 @@ async def get_status(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     return await state.redis_client.hgetall(task_id)
 
+
 @upscale_v1.get("/download/{task_id}")
 def download(task_id: str):
-    filename = next((f for f in os.listdir(settings.RESULT_DIR) if f.startswith(task_id)), None)
+    filename = get_filename_by_task_id(task_id)
     if not filename:
         logger.info(f"Task id: {task_id}. File not found")
         raise HTTPException(status_code=404, detail="Result not found")

@@ -1,14 +1,15 @@
 import typing
 import asyncio
-from redis.asyncio import Redis
-from aiokafka import AIOKafkaProducer
 from contextlib import asynccontextmanager
+from aiokafka import AIOKafkaProducer
 from fastapi import FastAPI
+from redis.asyncio import Redis
 from app.core import settings
 from app.api import api
 from fastapi.middleware.cors import CORSMiddleware
-from app.services.kafka import consume_photos
+from app.services import consume_photos
 from app.utils import ensure_unique_route_names, simplify_operation_ids
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> typing.AsyncGenerator[None, None]:
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI) -> typing.AsyncGenerator[None, None]:
     yield
     if state.kafka_producer:
         await state.kafka_producer.stop()
+
 
 def register_app():
     # FastAPI
@@ -45,6 +47,7 @@ def register_app():
 
     return app
 
+
 def register_middleware(app: FastAPI):
     """
     Add Middewares, the execution order is from bottom to top
@@ -62,6 +65,7 @@ def register_middleware(app: FastAPI):
             allow_methods=['*'],
             allow_headers=['*'],
         )
+
 
 def register_router(app: FastAPI):
     """
