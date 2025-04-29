@@ -1,46 +1,62 @@
 import asyncio
 import json
 from PIL import Image
-from pydantic import BaseModel, ValidationError
+from aiokafka.errors import KafkaConnectionError
+from pydantic import ValidationError
 from aiokafka import AIOKafkaConsumer
 from app.core import settings
-from app.services import state
 from app.logger import logger
+from app.services.redis_service import RedisService
+from app.utils import TaskStatus
+from app.models import PhotoTask
 
-class PhotoTask(BaseModel):
-    task_id: str
-    filename: str
-    scale: int
 
-status_store = {}
+async def consume_photos(redis_service: RedisService):
+    while True:
+        consumer = AIOKafkaConsumer(
+            settings.KAFKA_TOPIC,
+            bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+            group_id="photo-workers"
+        )
+        try:
+            logger.info(f"Trying connect to Kafka.")
+            await consumer.start()
+            logger.info("Kafka consumer started for topic: %s", settings.KAFKA_TOPIC)
 
-async def consume_photos():
-    consumer = AIOKafkaConsumer(
-        settings.KAFKA_TOPIC,
-        bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
-        group_id="photo-workers"
-    )
-    await consumer.start()
-
-    try:
-        async for msg in consumer:
             try:
-                data = json.loads(msg.value.decode("utf-8"))
-                task = PhotoTask(**data)
-                await process_task(task)
-            except (json.JSONDecodeError, ValidationError) as e:
-                logger.error(f"Failed to parse task: {str(e)}")
-                continue
-    finally:
-        await consumer.stop()
+                async for msg in consumer:
+                    await handle_message(msg.value, redis_service)
+            except Exception as e:
+                logger.exception(f"Unexpected error while consuming messages: {e}")
+            finally:
+                await consumer.stop()
+                logger.info("Kafka consumer stopped.")
+                break
+        except KafkaConnectionError as e:
+            logger.warning(f"Kafka unavailable: {e}")
+            await asyncio.sleep(settings.KAFKA_CONNECTION_DELAY)
+        except Exception as e:
+            logger.exception(f"Unexpected error starting Kafka consumer: {e}")
+            await asyncio.sleep(settings.KAFKA_CONNECTION_DELAY)
 
-async def process_task(task: PhotoTask):
-    logger.info(f"Start process image. Task id:{task.task_id}")
+
+async def handle_message(value: bytes, redis_service: RedisService) -> None:
+    try:
+        data = json.loads(value.decode("utf-8"))
+        task = PhotoTask(**data)
+        logger.info(f"Received task: {task.task_id}")
+        await process_task(task, redis_service)
+    except (json.JSONDecodeError, ValidationError) as e:
+        logger.exception(f"Failed to parse incoming message: {e}")
+
+
+async def process_task(task: PhotoTask, redis_service: RedisService) -> None:
     input_path = settings.UPLOAD_DIR / task.filename
     output_path = settings.RESULT_DIR / task.filename
 
+    logger.info(f"Start processing task: {task.task_id}")
     try:
-        await state.redis_client.hset(task.task_id, mapping={"status": "working"})
+        await redis_service.set_task_status(task.task_id, {"status": TaskStatus.RUNNING})
 
         await asyncio.sleep(60)
 
@@ -49,10 +65,11 @@ async def process_task(task: PhotoTask):
             result = img.resize(new_size)
             result.save(output_path)
 
-        await state.redis_client.hset(task.task_id, mapping={"status": "done"})
-        logger.info(f"Finish process image. Task id:{task.task_id}")
+        await redis_service.set_task_status(task.task_id, {"status": TaskStatus.COMPLETED})
+        logger.info(f"Task {task.task_id} completed successfully.")
     except Exception as e:
-        await state.redis_client.hset(task.task_id, mapping={
-            "status": "failed",
+        await redis_service.set_task_status(task.task_id, {
+            "status": TaskStatus.FAILED,
             "error": str(e)
         })
+        logger.exception(f"Failed to process task {task.task_id}: {e}")
