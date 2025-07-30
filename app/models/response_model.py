@@ -4,7 +4,10 @@ from app.utils import TaskStatus
 
 
 class UploadResponse(BaseModel):
-    task_id: str
+    guid: str
+    name: str
+    status: str
+    upscale: str
 
 class StatusResponse(BaseModel):
     status: TaskStatus

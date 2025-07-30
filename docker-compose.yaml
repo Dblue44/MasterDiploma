@@ -1,6 +1,77 @@
 version: '3.8'
 
 services:
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile_consumer
+    depends_on:
+      triton:
+        condition: service_healthy
+      init-kafka:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/backend/uploads
+      - results_data:/backend/results
+
+  triton:
+    image: nvcr.io/nvidia/tritonserver:25.05-pyt-python-py3
+    container_name: triton_server
+    ports:
+      - "8100:8000" #HTTP
+      - "8101:8001" #GRPC
+      - "8102:8002" #Metrics
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    tmpfs:
+      - /dev/shm:size=2g
+    volumes:
+      - ./model_repository:/models
+    command: [
+      "tritonserver",
+      "--model-repository=/models",
+      "--log-verbose=1"
+    ]
+    restart: unless-stopped
+    networks:
+      - triton-net
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    restart: unless-stopped
+    depends_on:
+      - triton
+    networks:
+      - triton-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    networks:
+      - triton-net
+
   zookeeper:
     image: confluentinc/cp-zookeeper:7.8.0
     hostname: zookeeper
@@ -15,7 +86,7 @@ services:
       - kafka-net
 
   kafka1:
-    image: &kafka-image confluentinc/cp-kafka:7.8.0
+    image: confluentinc/cp-kafka:7.8.0
     hostname: kafka1
     container_name: kafka1
     depends_on:
@@ -32,6 +103,7 @@ services:
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:29092,EXTERNAL://${DOCKER_HOST_IP:-127.0.0.1}:9092
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_JMX_PORT: 9997
@@ -40,13 +112,24 @@ services:
       - kafka-net
 
   init-kafka:
-     image: *kafka-image
-     entrypoint: /bin/bash
-     depends_on:
-       kafka1:
-         condition: service_healthy
-     command: |
-       kafka-topics.sh --create --if-not-exists --topic photo-tasks --replication-factor=1 --partitions=1 --bootstrap-server kafka1:29092
+    image: confluentinc/cp-kafka:7.8.0
+    entrypoint: [ '/bin/sh', '-c' ]
+    depends_on:
+      - kafka1
+      - kafka-ui
+    command: |
+      "
+      echo -e 'Waiting kafka server'
+      kafka-topics --bootstrap-server kafka1:29092 --list
+
+      echo -e 'Creating kafka topics'
+      kafka-topics --bootstrap-server kafka1:29092 --create --if-not-exists --topic photo-tasks --replication-factor 1 --partitions 1
+
+      echo -e 'Successfully created the following topics:'
+      kafka-topics --bootstrap-server kafka1:29092 --list
+      "
+    networks:
+      - kafka-net
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -59,7 +142,7 @@ services:
       DYNAMIC_CONFIG_ENABLED: true
       KAFKA_CLUSTERS_0_NAME: Local Kafka Cluster
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka1:29092
-      KAFKA_CLUSTERS_0_ZOOKEEPER:  zookeeper:2181
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
       KAFKA_CLUSTERS_0_METRICS_PORT: 9997
       KAFKA_CLUSTERS_0_METRICS_TYPE: JMX
     networks:
@@ -79,7 +162,15 @@ services:
 networks:
   kafka-net:
     driver: bridge
+  triton-net:
+    driver: bridge
 
 volumes:
+  uploads_data:
+    driver: local
+  results_data:
+    driver: local
   redis-cache:
+    driver: local
+  grafana_data:
     driver: local

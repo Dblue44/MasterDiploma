@@ -11,6 +11,7 @@ class KafkaService:
     def __init__(self):
         self.producer = None
         self.connected = False
+        self.start_reconnect_loop = False
         self._lock = asyncio.Lock()
 
     async def start(self):
@@ -23,18 +24,20 @@ class KafkaService:
                 )
                 await self.producer.start()
                 self.connected = True
-                logger.info("Kafka producer started successfully.")
+                logger.info("[Producer] Kafka producer started successfully.")
             except KafkaConnectionError as e:
                 await self.stop()
-                logger.warning(f"Kafka unavailable: {e}")
+                logger.warning(f"[Producer] Kafka not connected: {e}")
                 self.producer = None
                 self.connected = False
+                self.start_reconnect_loop = False
 
     async def try_reconnect_loop(self):
-        logger.warning("Kafka not connected on startup. Will retry in background.")
+        logger.warning("[Producer] Kafka not connected on startup. Will retry in background.")
+        self.start_reconnect_loop = True
         while not self.connected:
             await asyncio.sleep(settings.KAFKA_CONNECTION_DELAY)
-            logger.info("Kafka unavailable. Retrying Kafka connection.")
+            logger.info("[Producer] Kafka unavailable. Retrying Kafka connection.")
             await self.start()
 
     async def stop(self):
@@ -43,8 +46,10 @@ class KafkaService:
             self.connected = False
 
     async def send_task(self, topic: str, task: dict):
+        if not self.connected and not self.start_reconnect_loop:
+            await self.try_reconnect_loop()
         if not self.producer:
-            raise RuntimeError("Kafka producer not initialized")
+            raise RuntimeError("[Producer] Kafka producer not initialized")
         await self.producer.send_and_wait(
             topic,
             json.dumps(task).encode("utf-8")

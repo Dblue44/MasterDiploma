@@ -4,21 +4,15 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # Uvicorn
-    UVICORN_HOST: str = 'localhost'
-    UVICORN_PORT: int = 8085
-    UVICORN_RELOAD: bool = True
-
-    # FastAPI
-    TITLE: str = 'FastAPI'
-    VERSION: str = '1.0.0'
-    DESCRIPTION: str = 'FastAPI'
-    DOCS_URL: str | None = f'/docs'
-    REDOCS_URL: str | None = f'/redocs'
-    OPENAPI_URL: str | None = f'/openapi'
-
     # Middleware
     MIDDLEWARE_CORS: bool = True
+
+    # Triton
+    TRITON_SERVER_HOST: str = 'localhost'
+    TRITON_SERVER_PORT: int = 8100
+    TRITON_SERVER_URL: str = f"{TRITON_SERVER_HOST}:{TRITON_SERVER_PORT}"
+    TRITON_BATCH_SIZE: int = 4
+    TRITON_OVERLAP_SIZE: int = 32
 
     # Redis
     REDIS_SERVER: str = "localhost"

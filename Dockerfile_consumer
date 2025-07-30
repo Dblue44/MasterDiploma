@@ -1,6 +1,6 @@
-FROM python:3.10-slim as base
+FROM python:3.12-slim AS base
 
-ENV WORKDIR /backend
+ENV WORKDIR=/backend
 WORKDIR $WORKDIR
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -16,7 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/poetry/bin:/venv/bin:$PATH" \
     PYTHONPATH=$WORKDIR
 
-FROM base as builder
+FROM base AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -29,12 +29,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY poetry.lock pyproject.toml ./
 
 RUN python -m venv $VIRTUAL_ENV && \
-    poetry install --no-dev --no-interaction --no-ansi --with api
+    poetry config virtualenvs.create false && \
+    poetry install --only main,consumer --no-interaction --no-ansi
 
-FROM python:3.10-slim as prod
+FROM python:3.12-slim AS prod
 
-ENV WORKDIR /backend
+ENV WORKDIR=/backend
 WORKDIR $WORKDIR
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libgl1 \
+      libglib2.0-0 \
+      libsm6 \
+      libxrender1 \
+      libxext6 \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -44,8 +53,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=$WORKDIR
 
 COPY --from=builder /venv /venv
-COPY ./app ./app
+COPY ./consumer ./consumer
 
-EXPOSE 8085
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8085"]
+CMD ["python", "-m", "consumer.main"]

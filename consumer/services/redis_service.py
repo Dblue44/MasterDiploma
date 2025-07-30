@@ -1,8 +1,7 @@
 # app/services/redis_service.py
+import json
 from redis.asyncio import Redis
-from app.logger import logger
-from app.core import settings
-
+from consumer.conf import logger, settings
 
 class RedisService:
     def __init__(self):
@@ -30,6 +29,9 @@ class RedisService:
         if not self.client:
             raise RuntimeError("Redis client not initialized")
         await self.client.hset(task_id, mapping=status)
+        channel = f"task_update:{task_id}"
+        await self.client.publish(channel, json.dumps(status))
+        logger.debug(f"Published status to channel {channel}: {status}")
 
     async def get_task_status(self, task_id: str) -> dict:
         if not self.client:
