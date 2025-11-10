@@ -1,4 +1,3 @@
-# app/services/redis_service.py
 import json
 from redis.asyncio import Redis
 from consumer.conf import logger, settings

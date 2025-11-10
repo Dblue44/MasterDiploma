@@ -14,6 +14,8 @@ from consumer.utils import TaskStatus, PhotoTask
 
 
 async def consume_photos(redis_service: RedisService, triton_service: TritonService):
+    semaphore = asyncio.Semaphore(settings.MAX_CONSUMER_THREADS)
+
     while True:
         consumer = AIOKafkaConsumer(
             settings.KAFKA_TOPIC,
@@ -31,7 +33,7 @@ async def consume_photos(redis_service: RedisService, triton_service: TritonServ
 
             try:
                 async for msg in consumer:
-                    asyncio.create_task(handle_message(msg.value, redis_service, triton_service))
+                    asyncio.create_task(handle_message(msg.value, redis_service, triton_service, semaphore))
             except Exception as e:
                 logger.exception(f"[Consumer] Unexpected error while consuming messages: {e}")
             # finally:
@@ -46,9 +48,12 @@ async def consume_photos(redis_service: RedisService, triton_service: TritonServ
             await asyncio.sleep(settings.KAFKA_CONNECTION_DELAY)
 
 
-async def handle_message(value: bytes,
-                         redis_service: RedisService,
-                         triton_service: TritonService) -> None:
+async def handle_message(
+    value: bytes,
+    redis_service: RedisService,
+    triton_service: TritonService,
+    semaphore: asyncio.Semaphore
+) -> None:
     """
     Processes a single Kafka message: parses JSON, creates a Photo Task, and starts the processing process.
 
@@ -56,40 +61,52 @@ async def handle_message(value: bytes,
         value (bytes): Raw bytes of the message from Kafka.
         redis_service (RedisService): A service for updating statuses in Redis.
         triton_service (TritonService): Service for calling Triton Inference Server.
-
+        semaphore (asyncio.Semaphore): Semaphore for awaiting free thread.
     Returns:
         None
     """
-    try:
-        data = json.loads(value.decode("utf-8"))
-        task = PhotoTask(**data)
-        logger.info(f"Received task: {task.task_id}")
-        logger.info(f"Simulating processing for task {task.task_id}, waiting 20 seconds...")
+    async with semaphore:
+        try:
+            await asyncio.wait_for(
+                _process_message_internal(value, redis_service, triton_service),
+                timeout=settings.TASK_TIMEOUT_SECONDS
+            )
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.exception(f"Failed to parse incoming message: {e}")
+        except asyncio.TimeoutError:
+            logger.error(f"[Consumer] Task processing timeout after {settings.TASK_TIMEOUT_SECONDS}s")
+        except Exception as e:
+            logger.exception(f"[ImageWorker] Error: {e}")
 
-        await asyncio.sleep(20)
+async def _process_message_internal(
+    value: bytes,
+    redis_service: RedisService,
+    triton_service: TritonService
+) -> None:
+    data = json.loads(value.decode("utf-8"))
+    task = PhotoTask(**data)
+    logger.info(f"Received task: {task.task_id}")
+    logger.info(f"Simulating processing for task {task.task_id}, waiting 20 seconds...")
 
-        if random.random() < 0.5:
-            logger.info(f"Task {task.task_id} simulated completed.")
-            await redis_service.set_task_status(task.task_id, {"status": TaskStatus.COMPLETED})
-            logger.info(f"Task {task.task_id} completed successfully.")
-        else:
-            logger.info(f"Task {task.task_id} simulated failure.")
-            await redis_service.set_task_status(task.task_id, {"status": TaskStatus.FAILED})
-            logger.warning(f"Task {task.task_id} failed successfully.")
-        # success, error_message = await process_task(task, redis_service, triton_service)
-        # if success is False:
-        #     await redis_service.set_task_status(task.task_id, {
-        #         "status": TaskStatus.FAILED,
-        #         "error": error_message
-        #     })
-        #     logger.exception(error_message)
-    except (json.JSONDecodeError, ValidationError) as e:
-        logger.exception(f"Failed to parse incoming message: {e}")
-    except Exception as e:
-        logger.exception(f"[ImageWorker] Error: {e}")
+    await asyncio.sleep(20)
 
+    if random.random() < 0.5:
+        logger.info(f"Task {task.task_id} simulated completed.")
+        await redis_service.set_task_status(task.task_id, {"status": TaskStatus.COMPLETED})
+        logger.info(f"Task {task.task_id} completed successfully.")
+    else:
+        logger.info(f"Task {task.task_id} simulated failure.")
+        await redis_service.set_task_status(task.task_id, {"status": TaskStatus.FAILED})
+        logger.warning(f"Task {task.task_id} failed successfully.")
+    # success, error_message = await _process_task(task, redis_service, triton_service)
+    # if success is False:
+    #     await redis_service.set_task_status(task.task_id, {
+    #         "status": TaskStatus.FAILED,
+    #         "error": error_message
+    #     })
+    #     logger.exception(error_message)
 
-async def process_task(task: PhotoTask, redis_service: RedisService, triton_service: TritonService) -> (bool, str):
+async def _process_task(task: PhotoTask, redis_service: RedisService, triton_service: TritonService) -> (bool, str):
     """
         Reads the original photo, splits it into overlapping tiles,
         sends tile batches to Triton, and collects the output tiles back.
@@ -159,8 +176,7 @@ async def process_task(task: PhotoTask, redis_service: RedisService, triton_serv
         logger.exception(f"[ImageWorker] Failed to process task {task.task_id}: {e}")
 
 
-async def process_task_tiles(task: PhotoTask, redis_service: RedisService, triton_service: TritonService) -> (bool,
-                                                                                                              str):
+async def process_task_tiles(task: PhotoTask, redis_service: RedisService, triton_service: TritonService) -> (bool, str):
     """
     Reads the original photo, splits it into overlapping tiles,
     sends tile batches to Triton, and collects the output tiles back.

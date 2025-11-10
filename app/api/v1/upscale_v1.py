@@ -1,3 +1,5 @@
+from typing import List
+from fastapi.responses import FileResponse
 from fastapi import APIRouter, UploadFile, File, Request, Depends, HTTPException
 from app.services import ImageService
 from app.models import UploadRequest, UploadResponse, StatusResponse, DownloadResponse
@@ -37,28 +39,15 @@ async def get_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@upscale_v1.get("/info/{task_id}", response_model=DownloadResponse)
-async def info(
-        task_id: str,
-        image_service: ImageService = Depends(get_image_service)
-):
+@upscale_v1.post("/downloadImages")
+async def download_images(guids: List[str], image_service: ImageService = Depends(get_image_service)):
     try:
-        file_path, filename = await image_service.get_image(task_id)
-        return {"file_path": str(file_path), "filename": filename}
+        if len(guids) == 1:
+            return await image_service.download_image(guids[0])
+        else:
+            return await image_service.download_images(guids)
     except HTTPException as he:
         raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@upscale_v1.get("/download/{file_patch}/{file_name}", response_model=DownloadResponse)
-async def download(
-        file_patch: str,
-        file_name: str,
-        image_service: ImageService = Depends(get_image_service)
-):
-    try:
-        return await image_service.download_image(file_patch, file_name)
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))

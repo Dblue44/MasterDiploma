@@ -17,7 +17,7 @@ services:
       - results_data:/backend/results
 
   triton:
-    image: nvcr.io/nvidia/tritonserver:25.05-pyt-python-py3
+    image: nvcr.io/nvidia/tritonserver:25.05-py3
     container_name: triton_server
     ports:
       - "8100:8000" #HTTP
@@ -31,17 +31,20 @@ services:
               count: 1
               capabilities: [ gpu ]
     tmpfs:
-      - /dev/shm:size=2g
+      - /dev/shm:size=4g
     volumes:
       - ./model_repository:/models
+      - ./models_cache:/models_cache
     command: [
       "tritonserver",
       "--model-repository=/models",
-      "--log-verbose=1"
+      "--log-verbose=1",
+      "--backend-config=default-max-batch-size=1"
     ]
     restart: unless-stopped
     networks:
       - triton-net
+
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -66,6 +69,9 @@ services:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     restart: unless-stopped
     depends_on:
       - prometheus

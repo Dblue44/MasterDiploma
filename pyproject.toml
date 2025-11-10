@@ -16,11 +16,10 @@ redis = "^5.2.1"
 python-multipart = "^0.0.20"
 opencv-python = "^4.11.0.86"
 numpy = "^2.2.6"
-uvicorn = {extras = ["standard"], version = "^0.35.0"}
 
 [tool.poetry.group.api.dependencies]
 fastapi = "^0.116.0"
-uvicorn = "^0.35.0"
+uvicorn = {extras = ["standard"], version = "^0.35.0"}
 
 [tool.poetry.group.consumer.dependencies]
 tritonclient = {extras = ["http", "cuda"], version = "^2.58.0"}

@@ -1,6 +1,6 @@
-FROM python:3.10-slim as base
+FROM python:3.12-slim AS base
 
-ENV WORKDIR /backend
+ENV WORKDIR=/backend
 WORKDIR $WORKDIR
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -16,7 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/poetry/bin:/venv/bin:$PATH" \
     PYTHONPATH=$WORKDIR
 
-FROM base as builder
+FROM base AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -31,9 +31,9 @@ COPY poetry.lock pyproject.toml ./
 RUN python -m venv $VIRTUAL_ENV && \
     poetry install --no-dev --no-interaction --no-ansi --with api
 
-FROM python:3.10-slim as prod
+FROM python:3.12-slim AS prod
 
-ENV WORKDIR /backend
+ENV WORKDIR=/backend
 WORKDIR $WORKDIR
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

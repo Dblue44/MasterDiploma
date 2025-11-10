@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     TRITON_SERVER_HOST: str = 'localhost'
     TRITON_SERVER_PORT: int = 8100
     TRITON_SERVER_URL: str = f"{TRITON_SERVER_HOST}:{TRITON_SERVER_PORT}"
-    TRITON_BATCH_SIZE: int = 4
+    TRITON_BATCH_SIZE: int = 1
     TRITON_OVERLAP_SIZE: int = 32
 
     # Redis
@@ -29,6 +29,9 @@ class Settings(BaseSettings):
 
     UPLOAD_DIR.mkdir(exist_ok=True)
     RESULT_DIR.mkdir(exist_ok=True)
+
+    MAX_CONSUMER_THREADS: int = 1
+    TASK_TIMEOUT_SECONDS: int = 300
 
 
 @lru_cache

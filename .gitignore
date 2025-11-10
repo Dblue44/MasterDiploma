@@ -131,3 +131,6 @@ cython_debug/
 results/
 uploads/
 /model_repository/
+model.pt
+model.onnx
+/models_cache/
