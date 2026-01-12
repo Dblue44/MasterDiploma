@@ -134,3 +134,17 @@ uploads/
 model.pt
 model.onnx
 /models_cache/
+/checkpoints/
+/grafana/
+/images/
+/logs/
+/ma_results/
+/model_repository/
+/model_repository/
+/out_images/
+/test_infer/
+/.ipynb_checkpoints/
+/consumer/logs/
+/test_infer/
+/test_infer/
+/tests.ipynb
