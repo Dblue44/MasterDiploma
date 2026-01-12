@@ -1,6 +1,19 @@
 version: '3.8'
 
 services:
+  backend:
+    image: dstakheev/master-diploma:1.1.0
+    depends_on:
+      triton:
+        condition: service_healthy
+      init-kafka:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/backend/uploads
+      - results_data:/backend/results
+
   consumer:
     build:
       context: .

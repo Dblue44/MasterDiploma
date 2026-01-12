@@ -4,7 +4,7 @@ import os
 import mimetypes
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import List
@@ -23,6 +23,8 @@ from .redis_service import RedisService
 from .helper import get_filename_by_task_id
 from app.utils import TaskStatus
 
+def _now_ms() -> int:
+    return int(datetime.now(timezone.utc).timestamp() * 1000)
 
 class ImageService:
     def __init__(self, kafka_service: KafkaService, redis_service: RedisService):
@@ -33,43 +35,43 @@ class ImageService:
         logger.info(f"Uploading photo: {file.filename}, scale: {scale}")
 
         file_bytes = await file.read()
-        #
-        # nparr = np.frombuffer(file_bytes, np.uint8)
-        # img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        # if img is None:
-        #     logger.error("Cannot decode uploaded image via OpenCV")
-        #     raise HTTPException(status_code=400, detail="Invalid image file")
-        # height, width = img.shape[:2]
-        #
-        # if width > 1080 or height > 920:
-        #     logger.warning("Image size too large")
-        #     raise HTTPException(status_code=400, detail="Image dimensions too large")
+
+        nparr = np.frombuffer(file_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            logger.error("Cannot decode uploaded image via OpenCV")
+            raise HTTPException(status_code=400, detail="Invalid image file")
+        height, width = img.shape[:2]
+
+        if width > 1080 or height > 920:
+            logger.warning("Image size too large")
+            raise HTTPException(status_code=400, detail="Image dimensions too large")
 
         task_id = str(uuid.uuid4())
         filename = f"{task_id}_{file.filename}"
         save_path = settings.UPLOAD_DIR / filename
-        #
+
         logger.debug(f"Saving uploaded file to: {save_path}")
         with open(save_path, "wb") as out_file:
             out_file.write(file_bytes)
         await file.close()
-        #
+
         task = PhotoTask(task_id=task_id, filename=filename, scale=scale, model_name=model_name, model_version=model_version)
-        #
+
         try:
-            # logger.info(f"Trying to send task {task_id} to Kafka")
-            # await self.kafka.send_task(settings.KAFKA_TOPIC, task.model_dump())
+            logger.info(f"Trying to send task {task_id} to Kafka")
+            await self.kafka.send_task(settings.KAFKA_TOPIC, task.model_dump())
             logger.info(f"Task {task_id} successfully sent to Kafka")
-            await self.redis.set_task_status(task_id, {"status": TaskStatus.QUEUED})
+            await self.redis.set_task_status(task_id, {"status": TaskStatus.QUEUED.value, "started_at": _now_ms()})
         except Exception as e:
-            logger.error(f"Failed to send task {task_id} to Kafka: {e}")
+            logger.error(f"Failed on task {task_id}: {e}")
             await self.redis.set_task_status(task_id, {
-                "status": TaskStatus.QUEUED,
-                "pending_kafka": True,
+                "status": TaskStatus.QUEUED.value,
+                "pending_kafka": "True",
                 "error": str(e)
             })
 
-        return UploadResponse(guid=task_id, name=file.filename, status=TaskStatus.QUEUED, upscale=f"x{scale}")
+        return UploadResponse(guid=task_id, name=file.filename, status=TaskStatus.QUEUED.value, upscale=f"x{scale}")
 
     async def get_status(self, task_id: str) -> dict:
         logger.debug(f"Getting status for task: {task_id}")
@@ -78,7 +80,7 @@ class ImageService:
             raise HTTPException(status_code=404, detail="Task not found")
         return await self.redis.get_task_status(task_id)
 
-
+    @staticmethod
     async def download_images(self, guids: List[str]) -> FileResponse:
         """
         Проверяет существование всех файлов по GUID'ам, упаковывает их в ZIP и возвращает архив.
@@ -98,7 +100,7 @@ class ImageService:
             if not file_path.exists():
                 missing.append(guid)
                 continue
-            files_to_zip.append((file_path, filename))
+            files_to_zip.append((file_path, f"x2_{filename.replace(f"{guid}_", "")}"))
 
         if missing:
             logger.warning(f"[Download] Missing results for tasks: {missing}")
@@ -138,17 +140,17 @@ class ImageService:
                 pass
             raise
 
-
-    async def download_image(self, task_id: str) -> FileResponse:
+    @staticmethod
+    async def download_image(self, guid: str) -> FileResponse:
         """
         Ищет в settings.RESULT_DIR файл, соответствующий GUID (через get_filename_by_task_id),
         и отдает его как файл (image/*).
         """
-        logger.debug(f"[Download] Single image by task_id={task_id}")
+        logger.debug(f"[Download] Single image by task_id={guid}")
 
-        filename = get_filename_by_task_id(task_id)
+        filename = get_filename_by_task_id(guid)
         if not filename:
-            logger.warning(f"[Download] Result not found for task {task_id}")
+            logger.warning(f"[Download] Result not found for task {guid}")
             raise HTTPException(status_code=404, detail="Result not found")
 
         file_path = settings.RESULT_DIR / filename
@@ -161,10 +163,9 @@ class ImageService:
 
         return FileResponse(
             path=str(file_path),
-            filename=filename,
+            filename=f"x2{filename.replace(f"{guid}", "")}",
             media_type=mime
         )
-
 
     @staticmethod
     async def get_image_file(task_id: str) -> tuple[Path, str]:

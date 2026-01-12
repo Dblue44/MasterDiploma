@@ -25,20 +25,6 @@ async def upload_photo(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@upscale_v1.get("/status/{task_id}", response_model=StatusResponse)
-async def get_status(
-        task_id: str,
-        image_service: ImageService = Depends(get_image_service)
-):
-    try:
-        return await image_service.get_status(task_id)
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @upscale_v1.post("/downloadImages")
 async def download_images(guids: List[str], image_service: ImageService = Depends(get_image_service)):
     try:

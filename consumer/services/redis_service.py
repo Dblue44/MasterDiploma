@@ -2,9 +2,22 @@ import json
 from redis.asyncio import Redis
 from consumer.conf import logger, settings
 
+def _norm(v):
+    if v is None:
+        return None
+    if hasattr(v, "value"):
+        v = v.value
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    return str(v) if not isinstance(v, (int, float, bytes)) else v
+
 class RedisService:
     def __init__(self):
         self.client = None
+
+    @staticmethod
+    def _channel(task_id: str) -> str:
+        return f"task_update:{task_id}"
 
     async def start(self):
         try:
@@ -27,10 +40,18 @@ class RedisService:
     async def set_task_status(self, task_id: str, status: dict):
         if not self.client:
             raise RuntimeError("Redis client not initialized")
-        await self.client.hset(task_id, mapping=status)
-        channel = f"task_update:{task_id}"
-        await self.client.publish(channel, json.dumps(status))
-        logger.debug(f"Published status to channel {channel}: {status}")
+
+        safe = {k: _norm(v) for k, v in status.items() if _norm(v) is not None}
+        if not safe:
+            return
+
+        await self.client.hset(task_id, mapping=safe)
+
+        channel = self._channel(task_id)
+
+        await self.client.publish(channel, json.dumps(safe))
+
+        logger.debug(f"Published status to channel {channel}: {safe}")
 
     async def get_task_status(self, task_id: str) -> dict:
         if not self.client:

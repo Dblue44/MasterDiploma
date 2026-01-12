@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 .env
 *.pyc
+./app/logs
+./app/results
+./app/uploads
